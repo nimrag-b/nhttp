@@ -21,6 +21,46 @@
 
 namespace nhttp {
 
+    struct html_path {
+
+        html_path(const std::string& protocol, const std::string& domain, const std::string& path) : protocol(protocol), domain(domain) {
+
+            this->domain.erase(this->domain.find_last_not_of('/') + 1, std::string::npos);
+
+            if (path[0] == '/') {
+                this->path = path;
+            }
+            else {
+                this->path = '/' + path;
+            }
+        }
+
+        html_path(const std::string& request) {
+            size_t s = request.find("://");
+
+            protocol = request.substr(0, s);
+
+            size_t p = request.find("/", s + 3);
+
+            domain = request.substr(s + 3, p - s - 3);
+
+            path = request.substr(p);
+        }
+
+        std::string protocol;
+        std::string domain;
+        std::string path;
+
+
+        std::string full_path() const {
+            return domain + path;
+        }
+
+        std::string url() const {
+            return protocol + "://" + domain + path;
+        }
+
+    };
 
     struct http_response {
         std::string version;
@@ -28,7 +68,7 @@ namespace nhttp {
         std::string error_msg;
         std::unordered_map<std::string, std::string> headers;
 
-        std::string body;
+        std::vector<char> body;
 
 
     };
@@ -40,7 +80,7 @@ namespace nhttp {
         }
         outs << "\r\n";
 
-        return outs << resp.body << "\r\n\r\n";
+        return outs;// << resp.body << "\r\n\r\n";
     }
 
     enum class conn_err {
@@ -146,7 +186,7 @@ namespace nhttp {
         char* _tls_buffer = NULL;
         int _tls_buflen = 0;
         int _tls_used = 0;
-        char* _decrypted_buffer;
+        char* _decrypted_buffer = NULL;
         int _decrypted_buflen = 0;
 
     };
@@ -157,31 +197,31 @@ namespace nhttp {
     public:
 
 
-        bool connect(const std::string& url) {
+        bool connect(const html_path& url) {
 
             close();
 
 
-            size_t s = url.find("://");
-            if (s == std::string::npos) {
-                return false;
+            //size_t s = url.find("://");
+            //if (s == std::string::npos) {
+            //    return false;
+            //}
+
+            //std::string protocol = url.substr(0, s);
+
+            //size_t s1 = url.find("/", s + 3);
+            //if (s1 == std::string::npos) {
+            //    return false;
+            //}
+            //std::string host = url.substr(s + 3, s1 - (s + 3));
+
+            if (url.protocol == "http") {
+
+                return con.connect(url.domain.c_str(), 80, true);
+
             }
-
-            std::string protocol = url.substr(0, s);
-
-            size_t s1 = url.find("/", s + 3);
-            if (s1 == std::string::npos) {
-                return false;
-            }
-            std::string host = url.substr(s + 3, s1 - (s + 3));
-
-            if (protocol == "http") {
-
-                return con.connect(host.c_str(), 80, true);
-
-            }
-            else if (protocol == "https") {
-                if (!con.connect(host.c_str(), 443, false)) 
+            else if (url.protocol == "https") {
+                if (!con.connect(url.domain.c_str(), 443, false)) 
                     return false;
 
                 tls = std::make_unique<tls_socket>(con);
@@ -190,7 +230,7 @@ namespace nhttp {
                 for (size_t i = 0; i < 4; i++)
                 {
                     if (tls->tls_connect() != conn_err::OK) {
-                        //std::cout << "tls handshake failed. retrying... " << std::endl;
+                        std::cout << "tls handshake failed. retrying... " << std::endl;
                     }
                     else {
                         //std::cout << "tls success" << std::endl;
@@ -200,7 +240,7 @@ namespace nhttp {
                 }
 
                 if (!tlss) {
-                    //std::cout << "tls handshake failed." << std::endl;
+                    std::cout << "tls handshake failed." << std::endl;
                     con.close();
                     return false;
                 }
@@ -278,9 +318,12 @@ namespace nhttp {
 
             std::cout << request << std::endl;
 
+            _buflen = 0;
+
             if (_use_tls) {
                 tls->flush();
             }
+
 
             send(request);
 
@@ -301,7 +344,7 @@ namespace nhttp {
         conn_err readwait();
 
 
-        conn_err readbytes(size_t bytes, std::string& res);
+        conn_err readbytes(size_t bytes, std::vector<char>& res);
 
         conn_err readuntil(const char* str, std::string& res);
 

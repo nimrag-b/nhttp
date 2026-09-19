@@ -591,19 +591,21 @@ conn_err http_connection::readwait() {
 
 
 
-conn_err http_connection::readbytes(size_t bytes, std::string& res) {
+conn_err http_connection::readbytes(size_t bytes, std::vector<char>& res) {
     res.reserve(bytes);
 
-    std::cout << "requested: " << bytes << std::endl;
+    //std::cout << "requested: " << bytes << std::endl;
+
+
 
     if (_buflen > 0) {
         size_t count = std::min((size_t)_buflen, bytes);
-        res.append(_buffer, count);
+        res.insert(res.end(), _buffer, _buffer + count);
         MoveMemory(_buffer, _buffer + count, _buflen - count);
         _buflen -= count;
         bytes -= count;
 
-        std::cout << "buffered: " << count << std::endl;
+        //std::cout << "buffered: " << count << std::endl;
     }
 
     char buf[5012];
@@ -611,8 +613,8 @@ conn_err http_connection::readbytes(size_t bytes, std::string& res) {
 
 
     while (bytes) {
-        //conn_err err = readwait();
-        //if (err != conn_err::OK) return err;
+        conn_err err = readwait();
+        if (err != conn_err::OK) return err;
 
         size_t req = bytes < 5012 ? bytes : 5012;
 
@@ -620,8 +622,7 @@ conn_err http_connection::readbytes(size_t bytes, std::string& res) {
         //std::cout << "recieved: " << c << std::endl;
 
         bytes -= c;
-        
-        res.append(buf, c);
+        res.insert(res.end(), buf, buf + c);
     }
 
     return conn_err::OK;
@@ -686,10 +687,9 @@ bool http_connection::get_http_response(http_response& resp) {
     if (readuntil("\r\n", start_line) != conn_err::OK) return false;
 
     std::istringstream ss(start_line);
-
     ss >> resp.version;
     ss >> resp.error_code;
-    ss >> resp.error_msg;
+    std::getline(ss, resp.error_msg);
 
     resp.headers.clear();
     std::string header;
@@ -737,7 +737,7 @@ bool http_connection::get_http_response(http_response& resp) {
     }
 
 
-    std::string content;
+    std::vector<char> content;
 
     if (resp.headers.count("transfer-encoding")) {
         if (resp.headers["transfer-encoding"] == "chunked") {
@@ -775,7 +775,7 @@ bool http_connection::get_http_response(http_response& resp) {
 
 
     //redirect
-    if (resp.error_code == 301) {
+    if (resp.error_code == 301 || resp.error_code == 307) {
         if (resp.headers.count("location") == 0) {
             return false;
         }
@@ -790,6 +790,14 @@ bool http_connection::get_http_response(http_response& resp) {
 
         size_t i = redir.find("://");
         if (i == std::string::npos) {
+
+            if (redir[0] != '/') {
+                redir = '/' + redir;
+
+            }
+            if (request(http_method::GET, redir, resp) == conn_err::OK) {
+                return true;
+            }
             return false;
         }
 

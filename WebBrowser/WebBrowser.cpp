@@ -35,39 +35,93 @@ bool init() {
 
 int requested = 0;
 int completed = 0;
+void scrape(const nhttp::html_path& request);
+void get_all_links(nhttp::html_path& url, const std::string& src, std::vector<std::thread>& threads);
 
-void getres(nhttp::http_connection* con, const std::string& folder, const std::string& res) {
+void getres(const nhttp::html_path& baseurl, const std::string& res) {
+
+    std::string folder = baseurl.full_path();
+
+    size_t isfile = folder.find_last_of("/.");
+    if (folder[isfile] == '.') {
+        folder = folder.substr(0, folder.find_last_of('/'));
+    }
+
+    folder += '/';
+
+    std::string path;
+    std::string resloc;
+
+    if (res[0] == '/') {
+        path = folder.substr(0, folder.find('/')) + res;
+        resloc = res;
+    }
+    else {
+        path = folder + res;
+        resloc = folder.substr(folder.find('/')) + res;
+    }
+
+    size_t q = path.find('?');
+    if (q != std::string::npos) {
+        return;
+    }
+
+    q = path.find(':');
+    if (q != std::string::npos) {
+        return;
+    }
+    q = path.find('#');
+    if (q != std::string::npos) {
+        return;
+    }
+    if (std::filesystem::exists(path)) {
+        std::cout << "resource already exists: " << path << std::endl;
+        completed++;
+        return;
+    }
+
 
     std::cout << res << std::endl;
     //continue;
 
+    nhttp::http_connection con;
 
-    std::string path;
+    if (!con.connect(baseurl)) {
+        return;
+    }
+
+
+
+
 
 
     nhttp::http_response resp;
     int retrys = 0;
-    while (con->request(nhttp::http_method::GET, "/" + res, resp) != nhttp::conn_err::OK) {
-        //std::cout << "failed to GET resource " << res << std::endl;
+    while (con.request(nhttp::http_method::GET, resloc, resp) != nhttp::conn_err::OK) {
+        std::cout << "failed to GET resource " << resloc << std::endl;
         Sleep(50);
+        if (!con.connect(baseurl)) {
+            return;
+        }
         retrys++;
         if (retrys > 3) {
-            con->close();
-            delete con;
+            con.close();
+
             return;
         }
     }
+    con.close();
 
-    if (res[0] == '/') {
-        path = folder.substr(0, folder.find('/')) + res;
+    if (resp.error_code >= 400 && resp.error_code < 500) {
+        std::stringstream err;
+        err << "Error in response for '" << resloc << "':" << std::endl << std::endl << resp << std::endl;
+
+        std::cout << err.str();
+        return;
     }
-    else {
-        path = folder + "/" + res;
-    }
 
 
-    con->close();
-    delete con;
+
 
     size_t last = path.find_last_of('/');
 
@@ -81,19 +135,50 @@ void getres(nhttp::http_connection* con, const std::string& folder, const std::s
         }
     }
 
+    if (path.substr(last).find('.') == std::string::npos) {
+        if (resp.headers["content-type"].find("text/html") != std::string::npos) {
+            std::filesystem::create_directory(path);
+            path += "/index.html";
+        }
+
+    }
+
     std::ofstream f;
     f.open(path, std::ios::binary);
 
-    f << resp.body;
+    if (!f.is_open()) {
+        std::cout << "failed to open file: " << path << std::endl;
+        return;
+    }
+
+    //f << resp.body;
+    f.write(resp.body.data(), resp.body.size());
 
     f.close();
+     
+    std::string s = "GET '" + resloc + "' complete\n";
+    std::cout << s;
 
     completed++;
+
+    //if (resp.headers["content-type"].find("text/html") != std::string::npos) {
+
+    //    std::string strbody(resp.body.begin(), resp.body.end());
+
+    //    std::vector<std::thread> threads;
+    //    get_all_links(folder, url, strbody, threads);
+
+    //    for (auto& it : threads) {
+    //        it.join();
+    //    }
+    //}
 }
 
-std::vector<std::thread> get_links(const std::string& folder, const std::string& url, const std::string& src, const std::string& tag) {
+void get_links(const nhttp::html_path& url, const std::string& src, const std::string& tag, std::vector<std::thread>& threads) {
 
-    std::vector<std::thread> threads;
+    constexpr bool strip_hyperlinks = false;
+
+    constexpr bool scrape_deep = false;
 
     size_t i = 0;
     std::string search = tag + "=\"";
@@ -105,13 +190,26 @@ std::vector<std::thread> get_links(const std::string& folder, const std::string&
 
         i += search.length();
 
-
         while (src[tagidx] != '<') {
             tagidx--;
         }
+        tagidx++;
+        size_t l = tagidx;
+        while (src[l] != ' ') {
+            l++;
+        }
 
-        //dirty hack to exclude hyperlinks
-        if (src[tagidx + 1] == 'a' && src[tagidx + 2] == ' ') continue;
+        std::string htmltag = src.substr(tagidx, l - tagidx);
+
+        std::transform(htmltag.begin(), htmltag.end(), htmltag.begin(),
+            [](unsigned char c) { return std::tolower(c); });
+
+        if constexpr (strip_hyperlinks) {
+
+            //dirty hack to exclude hyperlinks
+            if (htmltag == "a") continue;
+
+        }
 
 
         size_t end = src.find('\"', i);
@@ -121,91 +219,128 @@ std::vector<std::thread> get_links(const std::string& folder, const std::string&
         }
         std::string respath = src.substr(i, end - i);
 
+        //std::string ext = respath.substr(respath.find('.'));
+
+
+        if (htmltag == "frame") {
+            scrape(nhttp::html_path{url.protocol, url.domain, respath});
+            continue;
+        }
+
         if (respath.find("http://") == 0 || respath.find("https://") == 0) {
+
+            if (scrape_deep) {
+                scrape(respath);
+            }
+
             continue;
         }
 
 
         requested++;
-        nhttp::http_connection* con = new nhttp::http_connection;
-
-        if (!con->connect(url)) {
-            continue;
-        }
-
-
 
         //getres(con, folder, respath);
-        std::thread t(getres,con, folder, respath);
+        std::thread t(getres,url, respath);
 
-        //threads.push_back(std::move(t));
-        t.join();
+        threads.push_back(std::move(t));
+        //t.join();
         //t.detach();
     }
 
-    return threads;
 }
 
-int main()
-{
+void get_all_links(const nhttp::html_path& url, const std::string& src, std::vector<std::thread>& threads) {
+    get_links(url, src, "src", threads);
+    get_links(url, src, "href", threads);
+    get_links(url, src, "background", threads);
+}
 
-    if (!init()) {
-        return -1;
-    }
 
+void scrape(const nhttp::html_path& request) {
     nhttp::http_connection con;
 
-    const std::string request = "https://xkcd.com/";
 
 
-    size_t s = request.find("://");
 
-    const std::string dir = request.substr(s + 3);
-
-    s = request.find("/", s + 3);
-
-    const std::string url = request.substr(0, s + 1);
-
-    const std::string page = request.substr(s);
+    const std::string dir = request.full_path();
 
 
-    std::filesystem::create_directories(dir);
+    //skip
+    if (dir.find('?') != std::string::npos) {
+        return;
+    }
 
-    if (!con.connect(url)) {
-        WSACleanup();
-        return -1;
+    size_t last = dir.find_last_of('/');
+
+    if (last != std::string::npos) {
+        //std::string dirp = dir.substr(0, last);
+
+        std::error_code ec;
+        if (!std::filesystem::create_directories(dir, ec) && ec) {
+            std::cerr << "mkdirs failed: " << ec.message() << '\n';
+            return;
+        }
+    }
+
+    if (!con.connect(request)) {
+        std::cout << "Failed" << std::endl;
+        return;
     }
 
     std::ofstream f;
 
     nhttp::http_response resp;
-    con.request(nhttp::http_method::GET, page, resp);
+    con.request(nhttp::http_method::GET, request.path, resp);
 
     con.close();
 
 
-    //std::cout << resp.body;
 
-    f.open(dir +"/index.html");
-    f << resp.body;
+    f.open(dir + "/index.html");
+    f.write(resp.body.data(), resp.body.size());
 
     f.close();
 
+    std::string strbody(resp.body.begin(), resp.body.end());
 
-
-    std::vector<std::thread> threads = get_links(dir,url,resp.body, "src");
-    std::vector<std::thread> threads1 = get_links(dir,url,resp.body, "href");
+    std::vector<std::thread> threads;
+    get_all_links(request, strbody, threads);
 
     for (auto& t : threads) {
         t.join();
     }
-    for (auto& t : threads1) {
-        t.join();
-    }
+
 
 
 
     std::cout << "Completed\n";
+}
+
+
+int main(int argc, char** argv)
+{
+    std::string request;
+    if (false) {
+        if (argc == 1) {
+            std::cout << "input address\n";
+            return -1;
+        }
+        request = argv[1];
+    }
+    else {
+        request = "https://www.willfallows.net/gallery";
+    }
+
+
+
+
+    if (!init()) {
+        return -1;
+    }
+
+
+
+    scrape(request);
 
     std::cout << "requested: " << requested << std::endl << "completed: " << completed << std::endl;
 
