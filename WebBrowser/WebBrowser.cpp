@@ -328,7 +328,7 @@ int main(int argc, char** argv)
         request = argv[1];
     }
     else {
-        request = "https://www.willfallows.net/gallery";
+        request = "https://thebestmotherfucking.website/";
     }
 
 
