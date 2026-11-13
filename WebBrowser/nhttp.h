@@ -35,6 +35,11 @@ namespace nhttp {
             }
         }
 
+        html_path(const char* request) : html_path(std::string(request)) {
+            
+            
+        }
+
         html_path(const std::string& request) {
             size_t s = request.find("://");
 

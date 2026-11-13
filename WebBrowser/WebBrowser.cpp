@@ -38,28 +38,15 @@ int completed = 0;
 void scrape(const nhttp::html_path& request);
 void get_all_links(nhttp::html_path& url, const std::string& src, std::vector<std::thread>& threads);
 
-void getres(const nhttp::html_path& baseurl, const std::string& res) {
 
-    std::string folder = baseurl.full_path();
 
-    size_t isfile = folder.find_last_of("/.");
-    if (folder[isfile] == '.') {
-        folder = folder.substr(0, folder.find_last_of('/'));
-    }
 
-    folder += '/';
 
-    std::string path;
-    std::string resloc;
 
-    if (res[0] == '/') {
-        path = folder.substr(0, folder.find('/')) + res;
-        resloc = res;
-    }
-    else {
-        path = folder + res;
-        resloc = folder.substr(folder.find('/')) + res;
-    }
+
+void getres(const nhttp::html_path & url) {
+
+    std::string path = url.full_path();
 
     size_t q = path.find('?');
     if (q != std::string::npos) {
@@ -81,12 +68,12 @@ void getres(const nhttp::html_path& baseurl, const std::string& res) {
     }
 
 
-    std::cout << res << std::endl;
+    std::cout << path << std::endl;
     //continue;
 
     nhttp::http_connection con;
 
-    if (!con.connect(baseurl)) {
+    if (!con.connect(url)) {
         return;
     }
 
@@ -97,10 +84,10 @@ void getres(const nhttp::html_path& baseurl, const std::string& res) {
 
     nhttp::http_response resp;
     int retrys = 0;
-    while (con.request(nhttp::http_method::GET, resloc, resp) != nhttp::conn_err::OK) {
-        std::cout << "failed to GET resource " << resloc << std::endl;
+    while (con.request(nhttp::http_method::GET, url.path, resp) != nhttp::conn_err::OK) {
+        std::cout << "failed to GET resource " << url.path << std::endl;
         Sleep(50);
-        if (!con.connect(baseurl)) {
+        if (!con.connect(url)) {
             return;
         }
         retrys++;
@@ -114,7 +101,7 @@ void getres(const nhttp::html_path& baseurl, const std::string& res) {
 
     if (resp.error_code >= 400 && resp.error_code < 500) {
         std::stringstream err;
-        err << "Error in response for '" << resloc << "':" << std::endl << std::endl << resp << std::endl;
+        err << "Error in response for '" << url.path << "':" << std::endl << std::endl << resp << std::endl;
 
         std::cout << err.str();
         return;
@@ -156,7 +143,7 @@ void getres(const nhttp::html_path& baseurl, const std::string& res) {
 
     f.close();
      
-    std::string s = "GET '" + resloc + "' complete\n";
+    std::string s = "GET '" + url.path + "' complete\n";
     std::cout << s;
 
     completed++;
@@ -172,6 +159,32 @@ void getres(const nhttp::html_path& baseurl, const std::string& res) {
     //        it.join();
     //    }
     //}
+}
+
+void getres_relative(const nhttp::html_path& baseurl, const std::string& res) {
+    std::string folder = baseurl.full_path();
+
+    size_t isfile = folder.find_last_of("/.");
+    if (folder[isfile] == '.') {
+        folder = folder.substr(0, folder.find_last_of('/'));
+    }
+
+    folder += '/';
+
+    std::string path;
+
+    if (res[0] == '/') {
+        path = baseurl.protocol + "://" + folder.substr(0, folder.find('/')) + res;
+        //resloc = res;
+    }
+    else {
+        path = baseurl.protocol + "://" + folder + res;
+        //resloc = folder.substr(folder.find('/')) + res;
+    }
+
+    nhttp::html_path url(baseurl.path);
+
+    getres(url);
 }
 
 void get_links(const nhttp::html_path& url, const std::string& src, const std::string& tag, std::vector<std::thread>& threads) {
@@ -240,7 +253,7 @@ void get_links(const nhttp::html_path& url, const std::string& src, const std::s
         requested++;
 
         //getres(con, folder, respath);
-        std::thread t(getres,url, respath);
+        std::thread t(getres_relative,url, respath);
 
         threads.push_back(std::move(t));
         //t.join();
@@ -319,6 +332,15 @@ void scrape(const nhttp::html_path& request) {
 
 int main(int argc, char** argv)
 {
+
+    if (!init()) {
+        return -1;
+    }
+
+
+    getres("http://ipv4.download.thinkbroadband.com/512MB.zip");
+    return 0;
+
     std::string request;
     if (false) {
         if (argc == 1) {
@@ -328,15 +350,11 @@ int main(int argc, char** argv)
         request = argv[1];
     }
     else {
-        request = "https://www.willfallows.net/gallery";
+        request = "https://www.youtube.com/";
     }
 
 
 
-
-    if (!init()) {
-        return -1;
-    }
 
 
 
