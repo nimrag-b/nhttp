@@ -350,7 +350,7 @@ int main(int argc, char** argv)
         request = argv[1];
     }
     else {
-        request = "https://www.youtube.com/";
+        request = "https://thebestmotherfucking.website/";
     }
 
 
